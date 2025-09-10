@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>잼–코어 계산기 (3코어 동시 최적화)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 24px; color: #111; }
+    h1 { margin: 0 0 12px; }
+    .sub { color:#666; margin-bottom: 20px; }
+    .row { display:flex; flex-wrap: wrap; gap:16px; }
+    .card { border:1px solid #ddd; border-radius:12px; padding:14px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+    .card h3 { margin:0 0 10px; font-size:16px; }
+    label { display:inline-flex; align-items:center; gap:8px; margin:6px 10px 6px 0; font-size:14px; }
+    input[type=number] { width:96px; padding:6px 8px; border:1px solid #ccc; border-radius:8px; }
+    button { padding:8px 12px; border:1px solid #222; background:#111; color:#fff; border-radius:10px; cursor:pointer; }
+    button.secondary { background:#f7f7f7; color:#111; border-color:#ddd; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    ul { margin:8px 0 0; padding-left:18px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f1f5f9; border:1px solid #e5e7eb; font-size:12px; margin-right:6px; }
+    .footer { margin-top: 10px; font-size:12px; color:#666; }
+    .grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .result { margin-top:18px; border:1px dashed #ccc; border-radius:12px; padding:14px; }
+    .ok { color:#0a7a30; }
+    .bad { color:#b00020; }
+    table { width:100%; border-collapse: collapse; margin-top:10px; }
+    th, td { border:1px solid #eee; padding:8px; text-align:center; font-size:13px; }
+    th { background:#fafafa; }
+    .muted { color:#666; }
+    .wrap { word-break: break-word; }
+  </style>
+</head>
+<body>
+  <h1>잼 배치 계산기</h1>
+  <div class="sub">왜그랬어 이호현.</div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>① 잼 추가</h3>
+      <label>의지력 <input type="number" id="gemWill" min="1" /></label>
+      <label>질서 <input type="number" id="gemOrder" min="0" /></label>
+      <button id="addGemBtn">추가</button>
+      <ul id="gemList"></ul>
+      <div class="footer muted">형식: (의지력, 질서). 예: (3,5)</div>
+    </div>
+
+    <div class="card">
+      <h3>② 코어 설정 (최대 3개)</h3>
+      <div id="coreInputs"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="addCoreBtn">코어 추가</button>
+        <button class="secondary" id="clearCoresBtn">초기화</button>
+      </div>
+      <div class="footer muted">각 코어: 의지력 제한 / 필요 질서</div>
+    </div>
+
+    <div class="card">
+      <h3>③ 계산</h3>
+      <div class="row">
+        <button id="calcBtn">최적 조합 계산</button>
+      </div>
+      <div class="footer muted">최적화 기준: <b>질서 총합 최대</b> (모든 코어가 기준을 넘기는 해 중)</div>
+    </div>
+  </div>
+
+  <div class="result" id="resultBox">결과가 여기에 표시됩니다.</div>
+
+<script>
+  // ====== 상태 ======
+  let gems = [];           // { will, order }
+  let cores = [];          // { limit, target }
+
+  // ====== UI Helpers ======
+  const $ = (sel) => document.querySelector(sel);
+  const listEl = $('#gemList');
+  const coreInputsEl = $('#coreInputs');
+  const resultBox = $('#resultBox');
+
+  function renderGems() {
+    listEl.innerHTML = '';
+    gems.forEach((g, i) => {
+      const li = document.createElement('li');
+      li.className = 'wrap';
+      li.innerHTML = `#${i+1} <span class="pill">의:${g.will}</span><span class="pill">질:${g.order}</span> <button class="secondary" onclick="removeGem(${i})">삭제</button>`;
+      listEl.appendChild(li);
+    });
+  }
+  function removeGem(i) { gems.splice(i,1); renderGems(); }
+
+  function renderCores() {
+    coreInputsEl.innerHTML = '';
+    cores.forEach((c, idx) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.alignItems = 'center';
+      row.style.marginBottom = '8px';
+      row.innerHTML = `
+        <div class="pill">코어 ${idx+1}</div>
+        <label>의지력 제한 <input type="number" min="1" value="${c.limit}" onchange="updateCore(${idx}, 'limit', this.value)"/></label>
+        <label>필요 질서 <input type="number" min="0" value="${c.target}" onchange="updateCore(${idx}, 'target', this.value)"/></label>
+        <button class="secondary" onclick="removeCore(${idx})">삭제</button>
+      `;
+      coreInputsEl.appendChild(row);
+    });
+  }
+  function updateCore(i, key, val) { cores[i][key] = parseInt(val||'0'); }
+  function removeCore(i) { cores.splice(i,1); renderCores(); }
+
+  // ====== 이벤트 바인딩 ======
+  $('#addGemBtn').addEventListener('click', () => {
+    const w = parseInt($('#gemWill').value);
+    const o = parseInt($('#gemOrder').value);
+    if (Number.isNaN(w) || Number.isNaN(o) || w <= 0 || o < 0) return;
+    gems.push({ will: w, order: o });
+    renderGems();
+  });
+
+  $('#seedBtn').addEventListener('click', () => {
+    // 예시 데이터 (사용자 시나리오 반영)
+    gems = [
+      {will:3, order:5}, {will:3, order:5}, {will:3, order:4},
+      {will:4, order:5}, {will:4, order:5}, {will:4, order:5}, {will:4, order:5},
+      {will:5, order:5}, {will:5, order:4}, {will:5, order:4}
+    ];
+    renderGems();
+  });
+
+  $('#addCoreBtn').addEventListener('click', () => {
+    if (cores.length >= 3) { alert('최대 3개의 코어까지 가능합니다.'); return; }
+    cores.push({ limit: 0, target: 0 });
+    renderCores();
+  });
+
+  $('#clearCoresBtn').addEventListener('click', () => { cores = []; renderCores(); });
+
+  $('#exportBtn').addEventListener('click', () => {
+    const payload = { gems, cores };
+    navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    alert('클립보드로 내보냈습니다. 붙여넣기(Ctrl+V)로 저장하세요.');
+  });
+
+  $('#importBtn').addEventListener('click', async () => {
+    const text = prompt('붙여넣기한 JSON을 입력하세요');
+    if (!text) return;
+    try {
+      const payload = JSON.parse(text);
+      if (Array.isArray(payload.gems)) gems = payload.gems.map(x => ({will:+x.will, order:+x.order}));
+      if (Array.isArray(payload.cores)) cores = payload.cores.map(x => ({limit:+x.limit, target:+x.target}));
+      renderGems(); renderCores();
+    } catch(e) { alert('JSON 파싱 실패'); }
+  });
+
+  $('#calcBtn').addEventListener('click', () => {
+    const report = solveMultiCore(gems, cores);
+    renderResult(report);
+  });
+
+  // ====== 핵심 알고리즘: 멀티 코어 동시 최적화 (중복 금지) ======
+  function solveMultiCore(inputGems, inputCores) {
+    const nC = inputCores.length;
+    if (nC === 0) return { ok:false, reason:'코어가 없습니다.' };
+    const G = inputGems.map((g, idx) => ({...g, idx}));
+
+    // 탐색 성능 향상: 질서가 큰 순으로 정렬 (동률 시 의지력 작은 순)
+    G.sort((a,b) => (b.order - a.order) || (a.will - b.will));
+
+    // suffixOrder[i] = i..end에서 얻을 수 있는 최대 질서 합 (모두 사용 가정)
+    const suffixOrder = new Array(G.length+1).fill(0);
+    for (let i = G.length-1; i >= 0; i--) suffixOrder[i] = suffixOrder[i+1] + G[i].order;
+
+    // 상태
+    const sums = Array.from({length:nC}, () => ({ will:0, order:0 }));
+    const assign = new Array(G.length).fill(-1); // -1=미사용, 0..nC-1 = 각 코어
+    let best = null; // { totalOrder, sums[], assign[] }
+
+    // 검사: 현재까지 의지력 초과면 컷
+    function willOver() {
+      for (let c=0; c<nC; c++) if (sums[c].will > (inputCores[c].limit||0)) return true;
+      return false;
+    }
+
+    // 하한/상한 기반 가지치기
+    function impossibleEvenIfUseAll(i) {
+      // 남은 잼의 총 질서
+      const remOrder = suffixOrder[i];
+      // 각 코어가 아직 필요한 질서의 합
+      let needSum = 0;
+      for (let c=0; c<nC; c++) {
+        const need = Math.max(0, (inputCores[c].target||0) - sums[c].order);
+        needSum += need;
+      }
+      // 남은 잼 전체 질서로도 필요 합을 못 채우면 불가능
+      return remOrder < needSum;
+    }
+
+    function allTargetsMet() {
+      for (let c=0; c<nC; c++) if (sums[c].order < (inputCores[c].target||0)) return false;
+      return true;
+    }
+
+    function totalOrderSum() { return sums.reduce((acc, s) => acc + s.order, 0); }
+
+    function dfs(i) {
+      // 가지치기
+      if (willOver()) return;
+      if (impossibleEvenIfUseAll(i)) return;
+
+      if (i === G.length) {
+        if (!allTargetsMet()) return;
+        const tot = totalOrderSum();
+        if (!best || tot > best.totalOrder) {
+          best = {
+            totalOrder: tot,
+            sums: sums.map(s => ({...s})),
+            assign: [...assign],
+          };
+        }
+        return;
+      }
+
+      // 1) 사용하지 않음
+      assign[i] = -1;
+      dfs(i+1);
+
+      // 2) 각 코어에 배정
+      for (let c=0; c<nC; c++) {
+        assign[i] = c;
+        sums[c].will += G[i].will;
+        sums[c].order += G[i].order;
+        dfs(i+1);
+        sums[c].will -= G[i].will;
+        sums[c].order -= G[i].order;
+      }
+
+      assign[i] = -1;
+    }
+
+    dfs(0);
+
+    if (!best) return { ok:false, reason:'조건을 동시에 만족하는 조합이 없습니다.' };
+
+    // 결과 형식 재구성: 각 코어 별 잼 목록 (원래 인덱스 기준으로 정렬)
+    const perCore = Array.from({length:nC}, () => []);
+    best.assign.forEach((c, gi) => { if (c >= 0) perCore[c].push(G[gi]); });
+    perCore.forEach(arr => arr.sort((a,b) => a.idx - b.idx));
+
+    return {
+      ok: true,
+      totalOrder: best.totalOrder,
+      cores: best.sums.map((s, i) => ({
+        will: s.will,
+        order: s.order,
+        gems: perCore[i]
+      }))
+    };
+  }
+
+  // ====== 결과 렌더링 ======
+  function renderResult(report) {
+    if (!report.ok) { resultBox.innerHTML = `<div class="bad"><b>실패</b> — ${report.reason}</div>`; return; }
+
+    let html = `<div class="ok"><b>성공</b> — 질서 총합 <b>${report.totalOrder}</b></div>`;
+    html += `<table><thead><tr><th>코어</th><th>의지력 합</th><th>질서 합</th><th>잼 조합</th></tr></thead><tbody>`;
+    report.cores.forEach((c, idx) => {
+      const combo = c.gems.length ? c.gems.map(g => `(${g.will},${g.order})`).join(' + ') : '<span class="muted">없음</span>';
+      html += `<tr><td>${idx+1}</td><td>${c.will}</td><td>${c.order}</td><td class="wrap">${combo}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    // 사용되지 않은 잼 표시
+    const usedSet = new Set();
+    report.cores.forEach(c => c.gems.forEach(g => usedSet.add(g.idx)));
+    const unused = gems.map((g, i) => ({...g, idx:i})).filter(g => !usedSet.has(g.idx));
+    if (unused.length) {
+      html += `<div style="margin-top:10px;" class="muted">미사용 잼: ${unused.map(g => `#${g.idx+1}(${g.will},${g.order})`).join(', ')}</div>`;
+    }
+
+    resultBox.innerHTML = html;
+  }
+
+  // 초기 렌더
+  renderGems();
+  renderCores();
+</script>
+</body>
+</html>
