@@ -32,8 +32,8 @@
   </style>
 </head>
 <body>
-  <h1>잼 배치 계산기</h1>
-  <div class="sub">왜그랬어 이호현.</div>
+  <h1>잼–코어 계산기</h1>
+  <div class="sub">왜 그랬어 이호현.</div>
 
   <div class="grid">
     <div class="card">
@@ -41,6 +41,7 @@
       <label>의지력 <input type="number" id="gemWill" min="1" /></label>
       <label>질서 <input type="number" id="gemOrder" min="0" /></label>
       <button id="addGemBtn">추가</button>
+      <button class="secondary" id="seedBtn">예시 불러오기</button>
       <ul id="gemList"></ul>
       <div class="footer muted">형식: (의지력, 질서). 예: (3,5)</div>
     </div>
@@ -59,6 +60,8 @@
       <h3>③ 계산</h3>
       <div class="row">
         <button id="calcBtn">최적 조합 계산</button>
+        <button class="secondary" id="exportBtn">데이터 내보내기</button>
+        <button class="secondary" id="importBtn">데이터 불러오기</button>
       </div>
       <div class="footer muted">최적화 기준: <b>질서 총합 최대</b> (모든 코어가 기준을 넘기는 해 중)</div>
     </div>
