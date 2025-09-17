@@ -208,25 +208,83 @@
     });
   }
 
+  // === 동시 조건을 고려한 1개 신규 잼 권장치 계산 ===
+  function isFeasible(gemsArr, coresArr){
+    // DFS로 가능 여부만 판정
+    const nC=coresArr.length; const G=gemsArr.map((g,i)=>({...g,idx:i}));
+    G.sort((a,b)=> (b.order-a.order)||(a.will-b.will));
+    const suf=new Array(G.length+1).fill(0); for(let i=G.length-1;i>=0;i--) suf[i]=suf[i+1]+G[i].order;
+    const sums=Array.from({length:nC},()=>({will:0,order:0}));
+    function over(){ for(let c=0;c<nC;c++) if(sums[c].will>(coresArr[c].limit||0)) return true; return false; }
+    function need(i){ let n=0; for(let c=0;c<nC;c++){ n+=Math.max(0,(coresArr[c].target||0)-sums[c].order);} return n; }
+    function full(){ for(let c=0;c<nC;c++) if(sums[c].order<(coresArr[c].target||0)) return false; return true; }
+    let ok=false;
+    (function dfs(i){ if(ok) return; if(over()) return; if(suf[i]<need(i)) return; if(i===G.length){ if(full()) ok=true; return; }
+      // skip
+      dfs(i+1);
+      // assign
+      for(let c=0;c<nC;c++){ sums[c].will+=G[i].will; sums[c].order+=G[i].order; dfs(i+1); sums[c].will-=G[i].will; sums[c].order-=G[i].order; if(ok) return; }
+    })(0);
+    return ok;
+  }
+
+  function computeOneGemSuggestions(gemsArr, coresArr){
+    if(!coresArr.length) return null;
+    const maxW = Math.max(...coresArr.map(c=>c.limit||0));
+    const sumTarget = coresArr.reduce((a,c)=>a+(c.target||0),0);
+    const frontier=[];
+    for(let w=1; w<=maxW; w++){
+      // 이진탐색으로 최소 order 찾기
+      let lo=0, hi=Math.max(sumTarget,1)+30; // 여유 버퍼
+      let ans=null;
+      while(lo<=hi){
+        const mid=((lo+hi)>>1);
+        if(isFeasible([...gemsArr, {will:w, order:mid}], coresArr)) { ans=mid; hi=mid-1; } else { lo=mid+1; }
+      }
+      if(ans!==null) frontier.push({will:w, minOrder:ans});
+    }
+    if(!frontier.length) return {frontier:[]};
+    // 요약 포인트
+    let bestMinOrder=frontier[0];
+    for(const p of frontier){ if(p.minOrder<bestMinOrder.minOrder || (p.minOrder===bestMinOrder.minOrder && p.will<bestMinOrder.will)) bestMinOrder=p; }
+    let bestMinWill=null; for(const p of frontier){ bestMinWill=p; break; } // frontier는 w 오름차순
+    return {frontier, bestMinOrder, bestMinWill};
+  }
+
   function renderResult(report) {
     hintBox.style.display='none'; hintBox.innerHTML='';
     if(!report.ok){
-      resultBox.innerHTML = `<div class="bad"><b>실패</b> — ${report.reason}</div>`;
+      resultBox.innerHTML = `<div class=\"bad\"><b>실패</b> — ${report.reason}</div>`;
       if(report.partial){
         let rows='';
-        report.partial.forEach(r=>{
-          rows+=`<tr><td>${r.core}</td><td>${r.limit}</td><td>${r.target}</td><td>${r.usedWill}</td><td>${r.bestOrder}</td><td>${r.deficit}</td></tr>`;
-        });
+        report.partial.forEach(r=>{ rows+=`<tr><td>${r.core}</td><td>${r.limit}</td><td>${r.target}</td><td>${r.usedWill}</td><td>${r.bestOrder}</td><td>${r.deficit}</td></tr>`; });
         hintBox.style.display='block';
-        hintBox.innerHTML=`<div class="bad"><b>부족분 가이드</b></div><table><thead><tr><th>코어</th><th>의지 제한</th><th>필요 질서</th><th>사용 의지</th><th>달성 질서</th><th>부족 질서</th></tr></thead><tbody>${rows}</tbody></table>`;
+        let html = `<div class=\"bad\"><b>부족분 가이드</b></div>`+
+          `<table><thead><tr><th>코어</th><th>의지 제한</th><th>필요 질서</th><th>사용 의지</th><th>달성 질서</th><th>부족 질서</th></tr></thead><tbody>${rows}</tbody></table>`;
+
+        // === 신규 잼 추천(1개 추가 시) ===
+        const suggest = computeOneGemSuggestions(gems, cores);
+        if(suggest && suggest.frontier && suggest.frontier.length){
+          const rows2 = suggest.frontier.map(x=>`<tr><td>${x.will}</td><td>${x.minOrder}</td></tr>`).join('');
+          const best1 = suggest.bestMinOrder ? `의지 ≤ <b>${suggest.bestMinOrder.will}</b>, 질서 ≥ <b>${suggest.bestMinOrder.minOrder}</b>` : '불가';
+          const best2 = suggest.bestMinWill ? `의지 ≤ <b>${suggest.bestMinWill.will}</b>, 질서 ≥ <b>${suggest.bestMinWill.minOrder}</b>` : '불가';
+          html += `
+            <div style=\"margin-top:12px\"><b>권장 신규 잼 (1개 추가 시)</b></div>
+            <table><thead><tr><th>의지 한도(≤)</th><th>필요 질서(≥)</th></tr></thead><tbody>${rows2}</tbody></table>
+            <div class=\"muted\" style=\"margin-top:6px\">요약 — 최소 질서: ${best1} / 최소 의지: ${best2}</div>
+          `;
+        } else {
+          html += `<div class=\"muted\" style=\"margin-top:8px\"><b>신규 잼 1개만으로는</b> 조건을 동시에 만족시킬 수 없습니다. (두 개 이상 필요)</div>`;
+        }
+        hintBox.innerHTML = html;
       }
       return;
     }
-    let html = `<div class="ok"><b>성공</b> — 질서 총합 <b>${report.totalOrder}</b></div>`;
+    let html = `<div class=\"ok\"><b>성공</b> — 질서 총합 <b>${report.totalOrder}</b></div>`;
     html+='<table><thead><tr><th>코어</th><th>의지력 합</th><th>질서 합</th><th>잼 조합</th></tr></thead><tbody>';
     report.cores.forEach((c,idx)=>{
-      const combo=c.gems.length?c.gems.map(g=>`(${g.will},${g.order})`).join(' + '):'<span class="muted">없음</span>';
-      html+=`<tr><td>${idx+1}</td><td>${c.will}</td><td>${c.order}</td><td class="wrap">${combo}</td></tr>`;
+      const combo=c.gems.length?c.gems.map(g=>`(${g.will},${g.order})`).join(' + '):'<span class=\"muted\">없음</span>';
+      html+=`<tr><td>${idx+1}</td><td>${c.will}</td><td>${c.order}</td><td class=\"wrap\">${combo}</td></tr>`;
     });
     html+='</tbody></table>';
     resultBox.innerHTML=html;
