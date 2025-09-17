@@ -60,6 +60,8 @@
       <h3>③ 계산</h3>
       <div class="row">
         <button id="calcBtn">최적 조합 계산</button>
+        <button class="secondary" id="exportBtn">데이터 내보내기</button>
+        <button class="secondary" id="importBtn">데이터 불러오기</button>
       </div>
     </div>
   </div>
@@ -229,6 +231,29 @@
     html+='</tbody></table>';
     resultBox.innerHTML=html;
   }
+
+  // JSON 내보내기/불러오기 복원
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    const payload = { gems, cores };
+    try {
+      navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      alert('클립보드로 내보냈습니다. 메모장 등에 붙여넣어 보관하세요.');
+    } catch(err){
+      alert('클립보드 복사 실패: '+err);
+    }
+  });
+  document.getElementById('importBtn').addEventListener('click', ()=>{
+    const text = prompt('붙여넣기한 JSON을 입력하세요');
+    if(!text) return;
+    try{
+      const payload = JSON.parse(text);
+      if (Array.isArray(payload.gems)) gems = payload.gems.map(x => ({will:+x.will, order:+x.order}));
+      if (Array.isArray(payload.cores)) cores = payload.cores.map(x => ({limit:+x.limit, target:+x.target}));
+      renderGems(); renderCores();
+    }catch(err){
+      alert('JSON 파싱 실패: '+err);
+    }
+  });
 
   renderGems();
   renderCores();
