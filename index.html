@@ -273,9 +273,9 @@
           const best2 = suggest.bestMinWill ? `의지 ≤ <b>${suggest.bestMinWill.will}</b>, 질서 ≥ <b>${suggest.bestMinWill.minOrder}</b>` : '불가';
           html += `
             <div style=\"margin-top:12px\"><b>권장 신규 잼 (1개 추가 시)</b></div>
-            <div class=\"muted\">유효 범위 적용: 의지 3~8, 질서 0~5</div>
-            <table><thead><tr><th>의지 한도(≤)</th><th>필요 질서(≥)</th></tr></thead><tbody>${rows2}</tbody></table>
-            <div class=\"muted\" style=\"margin-top:6px\">요약 — 최소 질서: ${best1} / 최소 의지: ${best2}</div>
+            <div class=\"muted\"></div>
+            <table><thead><tr><th>의지 (≤)</th><th>질서(≥)</th></tr></thead><tbody>${rows2}</tbody></table>
+            <div class=\"muted\" style=\"margin-top:6px\">
           `;
         } else {
           html += `<div class=\"muted\" style=\"margin-top:8px\"><b>신규 잼 1개만으로는</b> 조건을 동시에 만족시킬 수 없습니다. (두 개 이상 필요)</div>`;
