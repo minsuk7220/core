@@ -29,11 +29,14 @@
     th { background:#fafafa; }
     .muted { color:#666; }
     .wrap { word-break: break-word; }
+    details summary { cursor:pointer; }
+    code { background:#f6f8fa; padding:2px 6px; border-radius:6px; }
   </style>
+<!-- 기능: 불가능 시 필요 잼 가이드 계산(코어별 knapsack 기반 하한) 추가 -->
 </head>
 <body>
   <h1>잼–코어 계산기</h1>
-  <div class="sub">왜 그랬어 이호현.</div>
+  <div class="sub">잼(의지력, 질서)을 입력하고 최대 3개의 코어 조건을 만족하면서 <b>질서 합 최대</b>가 되도록 최적 조합을 찾아줍니다. (중복 사용 금지)</div>
 
   <div class="grid">
     <div class="card">
@@ -62,12 +65,18 @@
         <button id="calcBtn">최적 조합 계산</button>
         <button class="secondary" id="exportBtn">데이터 내보내기</button>
         <button class="secondary" id="importBtn">데이터 불러오기</button>
+        <button class="secondary" id="runTestsBtn">내장 테스트 실행</button>
       </div>
       <div class="footer muted">최적화 기준: <b>질서 총합 최대</b> (모든 코어가 기준을 넘기는 해 중)</div>
+      <details style="margin-top:10px">
+        <summary>동작 설명</summary>
+        <div class="muted">잼은 한 번씩만 사용할 수 있고, 각 코어의 의지력 합이 제한을 넘으면 안 됩니다.</div>
+      </details>
     </div>
   </div>
 
   <div class="result" id="resultBox">결과가 여기에 표시됩니다.</div>
+<div class="result" id="hintBox" style="display:none"></div>
 
 <script>
   // ====== 상태 ======
@@ -261,13 +270,24 @@
 
   // ====== 결과 렌더링 ======
   function renderResult(report) {
-    if (!report.ok) { resultBox.innerHTML = `<div class="bad"><b>실패</b> — ${report.reason}</div>`; return; }
+    const hintBox = document.getElementById('hintBox');
+    hintBox.style.display = 'none';
+    hintBox.innerHTML = '';
 
-    let html = `<div class="ok"><b>성공</b> — 질서 총합 <b>${report.totalOrder}</b></div>`;
+    if (!report.ok) {
+      resultBox.innerHTML = `<div class=\"bad\"><b>실패</b> — ${report.reason}</div>`;
+      // 불가능 시, 최소 필요 잼 가이드 계산 및 표시
+      const guide = computeMinimalGemGuide(gems, cores);
+      hintBox.style.display = 'block';
+      hintBox.innerHTML = guide.html;
+      return;
+    }
+
+    let html = `<div class=\"ok\"><b>성공</b> — 질서 총합 <b>${report.totalOrder}</b></div>`;
     html += `<table><thead><tr><th>코어</th><th>의지력 합</th><th>질서 합</th><th>잼 조합</th></tr></thead><tbody>`;
     report.cores.forEach((c, idx) => {
-      const combo = c.gems.length ? c.gems.map(g => `(${g.will},${g.order})`).join(' + ') : '<span class="muted">없음</span>';
-      html += `<tr><td>${idx+1}</td><td>${c.will}</td><td>${c.order}</td><td class="wrap">${combo}</td></tr>`;
+      const combo = c.gems.length ? c.gems.map(g => `(${g.will},${g.order})`).join(' + ') : '<span class=\"muted\">없음</span>';
+      html += `<tr><td>${idx+1}</td><td>${c.will}</td><td>${c.order}</td><td class=\"wrap\">${combo}</td></tr>`;
     });
     html += `</tbody></table>`;
 
@@ -276,11 +296,117 @@
     report.cores.forEach(c => c.gems.forEach(g => usedSet.add(g.idx)));
     const unused = gems.map((g, i) => ({...g, idx:i})).filter(g => !usedSet.has(g.idx));
     if (unused.length) {
-      html += `<div style="margin-top:10px;" class="muted">미사용 잼: ${unused.map(g => `#${g.idx+1}(${g.will},${g.order})`).join(', ')}</div>`;
+      html += `<div style=\"margin-top:10px;\" class=\"muted\">미사용 잼: ${unused.map(g => `#${g.idx+1}(${g.will},${g.order})`).join(', ')}</div>`;
     }
 
     resultBox.innerHTML = html;
   }
+
+  // ====== 필요 잼 가이드 ======
+  function knapBest(gemsArr, limit) {
+    // dp[w] = {order, usedWill}
+    const dp = Array.from({length: limit+1}, (_,w)=>({order:0, usedWill:0}));
+    for (const g of gemsArr) {
+      for (let w=limit; w>=g.will; w--) {
+        const candOrder = dp[w-g.will].order + g.order;
+        if (candOrder > dp[w].order) {
+          dp[w] = {order: candOrder, usedWill: dp[w-g.will].usedWill + g.will};
+        } else if (candOrder === dp[w].order && dp[w].usedWill > dp[w-g.will].usedWill + g.will) {
+          // 같은 질서 합이면 더 적은 의지력 사용을 선호
+          dp[w] = {order: candOrder, usedWill: dp[w-g.will].usedWill + g.will};
+        }
+      }
+    }
+    // 최대 order 달성 상태 선택(의지력 최소)
+    let best = {order:0, usedWill:0};
+    for (let w=0; w<=limit; w++) {
+      if (dp[w].order > best.order || (dp[w].order === best.order && dp[w].usedWill < best.usedWill)) best = {...dp[w]};
+    }
+    return best;
+  }
+
+  function computeMinimalGemGuide(gemsArr, coresArr) {
+    if (!coresArr.length) return {html:'<div class=\"muted\">코어가 없습니다.</div>'};
+    let rows = '';
+    let needsCount = 0;
+    coresArr.forEach((c, idx)=>{
+      const best = knapBest(gemsArr, c.limit||0);
+      const deficit = Math.max(0, (c.target||0) - best.order);
+      const remainW = Math.max(0, (c.limit||0) - best.usedWill);
+      let needStr = '<span class=\"ok\">충족</span>';
+      if (deficit>0) {
+        needsCount++;
+        if (remainW>0) {
+          needStr = `<b>필요 잼</b>: 의지 ≤ <b>${remainW}</b>, 질서 ≥ <b>${deficit}</b>`;
+        } else {
+          needStr = `<b>추가 1개로는 불가</b> (의지 여유 0). 기존 조합 교체 또는 코어 제한 상향 필요.`;
+        }
+      }
+      rows += `<tr><td>${idx+1}</td><td>${c.limit||0}</td><td>${c.target||0}</td><td>${best.usedWill}/${c.limit||0}</td><td>${best.order}</td><td>${Math.max(0,(c.target||0)-best.order)}</td><td>${needStr}</td></tr>`;
+    });
+
+    let note = '<div class=\"muted\" style=\"margin-top:8px\">참고: 각 코어를 개별적으로 최적화한 하한 가이드입니다. 잼 중복 사용 제약은 고려하지 않았으므로, 실제로는 더 높은 요구치가 필요할 수 있습니다.</div>';
+    if (needsCount>1) note += '<div class=\"muted\">여러 코어가 동시에 부족한 경우, <b>여러 개의 잼</b>이 필요할 수 있습니다.</div>';
+
+    const html = `
+      <div class=\"bad\"><b>조건 미충족</b> — 최소 필요 잼 가이드</div>
+      <table>
+        <thead><tr><th>코어</th><th>의지 제한</th><th>필요 질서</th><th>사용 의지</th><th>달성 질서</th><th>부족 질서</th><th>권장 스펙(단일 잼)</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${note}
+    `;
+    return {html};
+  }
+
+  // ====== 내장 테스트 ======
+  function runTests() {
+    const before = { gems: JSON.parse(JSON.stringify(gems)), cores: JSON.parse(JSON.stringify(cores)) };
+    const tests = [];
+
+    // Test 1: 단일 코어, 가능한 경우
+    tests.push(() => {
+      gems = [{will:3,order:5},{will:3,order:5},{will:5,order:5}];
+      cores = [{limit:11,target:14}];
+      const r = solveMultiCore(gems, cores);
+      console.assert(r.ok, 'Test1 실패: ok=false');
+      console.assert(r.totalOrder === 15, 'Test1 실패: totalOrder 기대 15, 실제 '+r.totalOrder);
+    });
+
+    // Test 2: 단일 코어, 불가능한 경우
+    tests.push(() => {
+      gems = [{will:3,order:5},{will:3,order:5},{will:5,order:5}];
+      cores = [{limit:11,target:16}];
+      const r = solveMultiCore(gems, cores);
+      console.assert(!r.ok, 'Test2 실패: 불가능해야 함');
+    });
+
+    // Test 3: 2코어 동시 충족, 중복 금지 확인
+    tests.push(() => {
+      gems = [{will:3,order:5},{will:3,order:5},{will:5,order:5},{will:4,order:5}];
+      cores = [{limit:11,target:14},{limit:4,target:5}];
+      const r = solveMultiCore(gems, cores);
+      console.assert(r.ok, 'Test3 실패: ok=false');
+      console.assert(r.totalOrder === 20, 'Test3 실패: totalOrder 기대 20, 실제 '+r.totalOrder);
+    });
+
+    // Test 4: 잼이 여유 있을 때 질서 합 최대 확인
+    tests.push(() => {
+      gems = [{will:2,order:1},{will:3,order:5},{will:4,order:5},{will:5,order:4}];
+      cores = [{limit:7,target:5}];
+      const r = solveMultiCore(gems, cores);
+      console.assert(r.ok, 'Test4 실패: ok=false');
+      // (3,5)+(2,1)=will 5, order 6 > (4,5)과 비교시 order 총합 6이 최대
+      console.assert(r.totalOrder === 6, 'Test4 실패: totalOrder 기대 6, 실제 '+r.totalOrder);
+    });
+
+    tests.forEach(fn => fn());
+    // 원복
+    gems = before.gems; cores = before.cores; renderGems(); renderCores();
+    resultBox.innerHTML = '<div class="ok">내장 테스트 완료 — 자세한 내용은 콘솔(DevTools) 확인</div>';
+  }
+
+  document.getElementById('runTestsBtn').addEventListener('click', runTests);
 
   // 초기 렌더
   renderGems();
