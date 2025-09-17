@@ -33,7 +33,7 @@
 </head>
 <body>
   <h1>잼–코어 계산기</h1>
-  <div class="sub">왜그랬어 이호현.</div>
+  <div class="sub">조건 만족 실패 시, 이제는 실제 <b>중복 금지 조건을 고려한 부족분 가이드</b>도 함께 표시됩니다.</div>
 
   <div class="grid">
     <div class="card">
@@ -111,7 +111,12 @@
   $('#addGemBtn').addEventListener('click', () => {
     const w = parseInt($('#gemWill').value);
     const o = parseInt($('#gemOrder').value);
-    if (Number.isNaN(w) || Number.isNaN(o) || w <= 0 || o < 0) return;
+    if (Number.isNaN(w) || Number.isNaN(o)) return;
+    // 유효 범위 체크 (의지 3~8, 질서 0~5)
+    if (w < 3 || w > 8 || o < 0 || o > 5) {
+      alert('의지력은 3~8, 질서포인트는 0~5 범위에서만 유효합니다.');
+      return;
+    }
     gems.push({ will: w, order: o });
     renderGems();
   });
@@ -230,25 +235,23 @@
 
   function computeOneGemSuggestions(gemsArr, coresArr){
     if(!coresArr.length) return null;
-    const maxW = Math.max(...coresArr.map(c=>c.limit||0));
-    const sumTarget = coresArr.reduce((a,c)=>a+(c.target||0),0);
+    // 유효 범위: 의지 3~8, 질서 0~5
+    const W_MIN=3, W_MAX=8, O_MIN=0, O_MAX=5;
     const frontier=[];
-    for(let w=1; w<=maxW; w++){
-      // 이진탐색으로 최소 order 찾기
-      let lo=0, hi=Math.max(sumTarget,1)+30; // 여유 버퍼
-      let ans=null;
-      while(lo<=hi){
-        const mid=((lo+hi)>>1);
-        if(isFeasible([...gemsArr, {will:w, order:mid}], coresArr)) { ans=mid; hi=mid-1; } else { lo=mid+1; }
+    for(let w=W_MIN; w<=W_MAX; w++){
+      // 가장 작은 질서부터 가능한지 탐색 (0..5)
+      let feasibleOrder=null;
+      for(let o=O_MIN; o<=O_MAX; o++){
+        if(isFeasible([...gemsArr, {will:w, order:o}], coresArr)) { feasibleOrder=o; break; }
       }
-      if(ans!==null) frontier.push({will:w, minOrder:ans});
+      if(feasibleOrder!==null) frontier.push({will:w, minOrder:feasibleOrder});
     }
     if(!frontier.length) return {frontier:[]};
     // 요약 포인트
     let bestMinOrder=frontier[0];
     for(const p of frontier){ if(p.minOrder<bestMinOrder.minOrder || (p.minOrder===bestMinOrder.minOrder && p.will<bestMinOrder.will)) bestMinOrder=p; }
-    let bestMinWill=null; for(const p of frontier){ bestMinWill=p; break; } // frontier는 w 오름차순
-    return {frontier, bestMinOrder, bestMinWill};
+    const bestMinWill = frontier[0]; // 의지 최소는 w 오름차순 첫 원소
+    return {frontier, bestMinOrder, bestMinWill, range:{W_MIN,W_MAX,O_MIN,O_MAX}};
   }
 
   function renderResult(report) {
@@ -265,11 +268,12 @@
         // === 신규 잼 추천(1개 추가 시) ===
         const suggest = computeOneGemSuggestions(gems, cores);
         if(suggest && suggest.frontier && suggest.frontier.length){
-          const rows2 = suggest.frontier.map(x=>`<tr><td>${x.will}</td><td>${x.minOrder}</td></tr>`).join('');
+          const rows2 = suggest.frontier.slice(0,3).map(x=>`<tr><td>${x.will}</td><td>${x.minOrder}</td></tr>`).join('');
           const best1 = suggest.bestMinOrder ? `의지 ≤ <b>${suggest.bestMinOrder.will}</b>, 질서 ≥ <b>${suggest.bestMinOrder.minOrder}</b>` : '불가';
           const best2 = suggest.bestMinWill ? `의지 ≤ <b>${suggest.bestMinWill.will}</b>, 질서 ≥ <b>${suggest.bestMinWill.minOrder}</b>` : '불가';
           html += `
             <div style=\"margin-top:12px\"><b>권장 신규 잼 (1개 추가 시)</b></div>
+            <div class=\"muted\">유효 범위 적용: 의지 3~8, 질서 0~5</div>
             <table><thead><tr><th>의지 한도(≤)</th><th>필요 질서(≥)</th></tr></thead><tbody>${rows2}</tbody></table>
             <div class=\"muted\" style=\"margin-top:6px\">요약 — 최소 질서: ${best1} / 최소 의지: ${best2}</div>
           `;
